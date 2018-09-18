@@ -8,7 +8,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: PACKAGE VERSION\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2018-09-17 17:56-0600\n"
+"POT-Creation-Date: 2018-09-18 13:53-0600\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -2054,6 +2054,7 @@ msgid "Build a version"
 msgstr ""
 
 #: templates/core/project_details.html:71
+msgctxt "Build is a verb"
 msgid "Build version"
 msgstr ""
 
