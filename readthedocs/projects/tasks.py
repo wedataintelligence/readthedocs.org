@@ -990,7 +990,10 @@ def fileify(version_pk, commit):
                 msg='Creating ImportedFiles',
             )
         )
-        _manage_imported_files(version, path, commit)
+        try:
+            _manage_imported_files(version, path, commit)
+        except Exception:
+            log.exception('_manage_imported_files failed. Logging but continuing')
     else:
         log.info(
             LOG_TEMPLATE.format(
