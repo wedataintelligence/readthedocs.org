@@ -46,6 +46,9 @@ class RTDDocTypeMixin(object):
         ):
             kwargs['refresh'] = True
 
+        if 'request_timeout' not in kwargs:
+            kwargs['request_timeout'] = 30
+
         # TODO: remove this overwrite when the issue has been fixed
         # https://github.com/sabricot/django-elasticsearch-dsl/issues/111
         if isinstance(thing, models.Model):
