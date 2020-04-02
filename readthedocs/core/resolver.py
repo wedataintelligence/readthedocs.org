@@ -5,9 +5,10 @@ from urllib.parse import urlunparse
 
 from django.conf import settings
 
+from readthedocs.builds.constants import EXTERNAL
 from readthedocs.core.utils.extend import SettingsOverrideObject
 from readthedocs.projects.constants import PRIVATE
-from readthedocs.builds.constants import EXTERNAL
+
 
 log = logging.getLogger(__name__)
 
@@ -117,22 +118,24 @@ class ResolverBase:
         subproject_slug = None
         # We currently support more than 2 levels of nesting subprojects and
         # translations, only loop twice to avoid sticking in the loop
-        for _ in range(0, 2):
+        for _ in range(2):
             main_language_project = current_project.main_language_project
-            relation = current_project.get_parent_relationship()
-
             if main_language_project:
                 current_project = main_language_project
                 project_slug = main_language_project.slug
                 language = project.language
                 subproject_slug = None
-            elif relation:
+                continue
+
+            relation = current_project.get_parent_relationship()
+            if relation:
                 current_project = relation.parent
                 project_slug = relation.parent.slug
                 subproject_slug = relation.alias
                 cname = relation.parent.domains.filter(canonical=True).first()
-            else:
-                break
+                continue
+
+            break
 
         single_version = bool(project.single_version or single_version)
 
@@ -218,17 +221,17 @@ class ResolverBase:
         # Track what projects have already been traversed to avoid infinite
         # recursion. We can't determine a root project well here, so you get
         # what you get if you have configured your project in a strange manner
-        if projects is None:
-            projects = [project]
-        else:
-            projects.append(project)
+        projects = projects or set()
+        projects.add(project)
 
         next_project = None
-        relation = project.get_parent_relationship()
         if project.main_language_project:
             next_project = project.main_language_project
-        elif relation:
-            next_project = relation.parent
+        else:
+            relation = project.get_parent_relationship()
+            if relation:
+                next_project = relation.parent
+
         if next_project and next_project not in projects:
             return self._get_canonical_project(next_project, projects)
         return project
@@ -247,13 +250,18 @@ class ResolverBase:
 
     def _get_private_and_external(self, project, version_slug):
         from readthedocs.builds.models import Version
+        private = settings.DEFAULT_PRIVACY_LEVEL == PRIVATE
+        external = False
         try:
-            version = project.versions.get(slug=version_slug)
-            private = version.privacy_level == PRIVATE
-            external = version.type == EXTERNAL
+            privacy_level, type_ = (
+                project.versions
+                .values_list('privacy_level', 'type')
+                .get(slug=version_slug)
+            )
+            private = privacy_level == PRIVATE
+            external = type_ == EXTERNAL
         except Version.DoesNotExist:
-            private = settings.DEFAULT_PRIVACY_LEVEL == PRIVATE
-            external = False
+            pass
         return private, external
 
     def _fix_filename(self, project, filename):
