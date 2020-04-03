@@ -1,7 +1,7 @@
 """Project views for authenticated users."""
-
 import csv
 import logging
+from urllib.parse import urlparse
 
 from allauth.socialaccount.models import SocialAccount
 from django.conf import settings
@@ -44,6 +44,7 @@ from readthedocs.core.mixins import (
     LoginRequiredMixin,
     PrivateViewMixin,
 )
+from readthedocs.core.resolver import resolve, resolve_path
 from readthedocs.core.utils import broadcast, trigger_build
 from readthedocs.core.utils.extend import SettingsOverrideObject
 from readthedocs.integrations.models import HttpExchange, Integration
@@ -462,7 +463,38 @@ class ProjectRelationshipList(ProjectRelationshipMixin, ListView):
     def get_context_data(self, **kwargs):
         ctx = super().get_context_data(**kwargs)
         ctx['superproject'] = self.project.superprojects.first()
+        ctx['subprojects_and_urls'] = self.get_subprojects_and_urls()
         return ctx
+
+    def get_subprojects_and_urls(self):
+        """
+        Get a tuple of subprojects and its absolute URls.
+
+        All subprojects share the domain from the parent,
+        so instead of resolving the domain and path of each subproject,
+        we only resolve the path of each one.
+        """
+        subprojects_and_urls = []
+
+        main_domain = resolve(self.project)
+        parsed_main_domain = urlparse(main_domain)
+        # Optimization for ``resolve_path``
+        subprojects = self.object_list.select_related('child')
+        for subproject in subprojects:
+            subproject_path = resolve_path(
+                subproject.child,
+                cname=parsed_main_domain.netloc,
+            )
+            parsed_subproject_domain = parsed_main_domain._replace(
+                path=subproject_path,
+            )
+            subprojects_and_urls.append(
+                (
+                    subproject,
+                    parsed_subproject_domain.geturl(),
+                )
+            )
+        return subprojects_and_urls
 
 
 class ProjectRelationshipCreate(ProjectRelationshipMixin, CreateView):
