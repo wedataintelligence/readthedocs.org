@@ -496,7 +496,6 @@ class Project(models.Model):
             project=self,
             version_slug=version_slug,
             language=lang_slug,
-            private=private,
             external=external,
         )
 

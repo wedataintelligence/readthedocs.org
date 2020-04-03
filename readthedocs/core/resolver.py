@@ -7,7 +7,6 @@ from django.conf import settings
 
 from readthedocs.builds.constants import EXTERNAL
 from readthedocs.core.utils.extend import SettingsOverrideObject
-from readthedocs.projects.constants import PRIVATE
 
 
 log = logging.getLogger(__name__)
@@ -60,7 +59,6 @@ class ResolverBase:
             filename,
             version_slug=None,
             language=None,
-            private=False,
             single_version=None,
             subproject_slug=None,
             subdomain=None,
@@ -101,41 +99,16 @@ class ResolverBase:
             single_version=None,
             subdomain=None,
             cname=None,
-            private=None,
     ):
         """Resolve a URL with a subset of fields defined."""
-        cname = cname or project.get_canonical_custom_domain()
         version_slug = version_slug or project.get_default_version()
         language = language or project.language
-
-        if private is None:
-            private, _ = self._get_private_and_external(project, version_slug)
-
         filename = self._fix_filename(project, filename)
 
-        current_project = project
-        project_slug = project.slug
-        subproject_slug = None
-        # We currently support more than 2 levels of nesting subprojects and
-        # translations, only loop twice to avoid sticking in the loop
-        for _ in range(2):
-            main_language_project = current_project.main_language_project
-            if main_language_project:
-                current_project = main_language_project
-                project_slug = main_language_project.slug
-                language = project.language
-                subproject_slug = None
-                continue
+        main_project, subproject_slug = self._get_main_project_data(project)
+        project_slug = main_project.slug
 
-            relation = current_project.get_parent_relationship()
-            if relation:
-                current_project = relation.parent
-                project_slug = relation.parent.slug
-                subproject_slug = relation.alias
-                cname = relation.parent.domains.filter(canonical=True).first()
-                continue
-
-            break
+        cname = cname or main_project.get_canonical_custom_domain()
 
         single_version = bool(project.single_version or single_version)
 
@@ -147,11 +120,37 @@ class ResolverBase:
             single_version=single_version,
             subproject_slug=subproject_slug,
             cname=cname,
-            private=private,
             subdomain=subdomain,
         )
 
-    def resolve_domain(self, project, private=None):
+    def _get_main_project_data(self, project):
+        """Returns a tuple of (main_project, subproject_slug)"""
+        # We currently support more than 2 levels of nesting subprojects and
+        # translations, only check 2 levels to avoid sticking in the loop.
+        # This means:
+        # The project can be a translation of a project,
+        # or the project can be a subproject of a project,
+        # or the project can be a translation of a subproject of a project,
+        # or the project can be a subproject of a translation of a project.
+        # On the first case we serve from the domain of the main language
+        # For the other cases, we always serve from the super project.
+
+        main_project = project
+        subproject_slug = None
+
+        main_language_project = main_project.main_language_project
+        if main_language_project:
+            main_project = main_language_project
+
+        relation = main_project.get_parent_relationship()
+        if relation:
+            main_project = relation.parent
+            subproject_slug = relation.alias
+
+        return (main_project, subproject_slug)
+
+
+    def resolve_domain(self, project):
         # pylint: disable=unused-argument
         canonical_project = self._get_canonical_project(project)
         domain = canonical_project.get_canonical_custom_domain()
@@ -165,14 +164,15 @@ class ResolverBase:
 
     def resolve(
             self, project, require_https=False, filename='', query_params='',
-            private=None, external=None, **kwargs
+            external=None, **kwargs
     ):
         version_slug = kwargs.get('version_slug')
 
-        if private is None or external is None:
-            if version_slug is None:
-                version_slug = project.get_default_version()
-            private, external = self._get_private_and_external(project, version_slug)
+        if version_slug is None:
+            version_slug = project.get_default_version()
+
+        if external is None:
+            external = self._is_external(project, version_slug)
 
         canonical_project = self._get_canonical_project(project)
         custom_domain = canonical_project.get_canonical_custom_domain()
@@ -203,7 +203,7 @@ class ResolverBase:
         protocol = 'https' if use_https_protocol else 'http'
 
         path = self.resolve_path(
-            project, filename=filename, private=private, **kwargs
+            project, filename=filename, **kwargs
         )
         return urlunparse((protocol, domain, path, '', query_params, ''))
 
@@ -248,21 +248,19 @@ class ResolverBase:
         subdomain_slug = project.slug.replace('_', '-')
         return '{}.{}'.format(subdomain_slug, settings.PUBLIC_DOMAIN)
 
-    def _get_private_and_external(self, project, version_slug):
+    def _is_external(self, project, version_slug):
         from readthedocs.builds.models import Version
-        private = settings.DEFAULT_PRIVACY_LEVEL == PRIVATE
-        external = False
+        is_external = False
         try:
-            privacy_level, type_ = (
+            type_ = (
                 project.versions
-                .values_list('privacy_level', 'type')
+                .values_list('type', flat=True)
                 .get(slug=version_slug)
             )
-            private = privacy_level == PRIVATE
-            external = type_ == EXTERNAL
+            is_external = type_ == EXTERNAL
         except Version.DoesNotExist:
             pass
-        return private, external
+        return is_external
 
     def _fix_filename(self, project, filename):
         """
